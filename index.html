@@ -1,0 +1,132 @@
+<?php
+// --- DATABASE LOGIC ---
+$db = new SQLite3('core_sites.db');
+$db->exec("CREATE TABLE IF NOT EXISTS sites (slug TEXT PRIMARY KEY, html TEXT)");
+
+// --- VIEWING LOGIC (For your friends) ---
+if (isset($_GET['site'])) {
+    $site_name = $_GET['site'];
+    $stmt = $db->prepare("SELECT html FROM sites WHERE slug = :slug");
+    $stmt->bindValue(':slug', $site_name, SQLITE3_TEXT);
+    $res = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
+    
+    if ($res) {
+        die($res['html']); // Show the live site
+    } else {
+        die("<h1 style='font-family:sans-serif; text-align:center; margin-top:100px;'>404: Site Not Found</h1>");
+    }
+}
+
+// --- PUBLISH LOGIC (AJAX) ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['publish_action'])) {
+    $slug = strtolower(preg_replace('/[^a-z0-9-]/', '', $_POST['site_slug']));
+    $html = $_POST['site_content'];
+    
+    $stmt = $db->prepare("INSERT OR REPLACE INTO sites (slug, html) VALUES (:slug, :html)");
+    $stmt->bindValue(':slug', $slug, SQLITE3_TEXT);
+    $stmt->bindValue(':html', $html, SQLITE3_TEXT);
+    $stmt->execute();
+    echo "SUCCESS";
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Core AI | Google Style Builder</title>
+    <style>
+        :root { --navy: #0a192f; --gold: #f1c40f; --accent: #1a73e8; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; display: flex; height: 100vh; background: #f0f2f5; overflow: hidden; }
+
+        /* Sidebar */
+        #sidebar { width: 300px; background: var(--navy); color: white; display: flex; flex-direction: column; padding: 20px; box-shadow: 5px 0 15px rgba(0,0,0,0.2); z-index: 10; }
+        .tool-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--gold); color: white; padding: 12px; border-radius: 6px; cursor: pointer; text-align: left; margin-bottom: 10px; transition: 0.3s; }
+        .tool-btn:hover { background: var(--gold); color: var(--navy); font-weight: bold; }
+
+        /* Main Area */
+        #main { flex-grow: 1; display: flex; flex-direction: column; }
+        header { height: 65px; background: white; display: flex; align-items: center; justify-content: flex-end; padding: 0 30px; border-bottom: 1px solid #ddd; gap: 10px; }
+        #canvas-area { flex-grow: 1; padding: 40px; overflow-y: auto; display: flex; justify-content: center; background: #eef2f5; }
+        #canvas { width: 100%; max-width: 850px; background: white; min-height: 1000px; padding: 60px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); outline: none; border-radius: 8px; }
+
+        /* Rendered Elements */
+        .royal-btn { display: inline-block; padding: 14px 28px; background: var(--navy); color: var(--gold) !important; border: 2px solid var(--gold); border-radius: 5px; text-decoration: none; font-weight: bold; margin: 15px 0; }
+        .pub-btn { background: var(--accent); color: white; border: none; padding: 10px 25px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2 style="color: var(--gold); border-bottom: 1px solid var(--gold); padding-bottom: 10px;">CORE BUILDER</h2>
+        <button class="tool-btn" onclick="addText('h1')">➕ Add Heading</button>
+        <button class="tool-btn" onclick="addText('p')">➕ Add Text Box</button>
+        <button class="tool-btn" onclick="addLinkButton()">🔗 Add Link Button</button>
+        <button class="tool-btn" onclick="addEmbed()">🖼️ Add Embed</button>
+    </div>
+
+    <div id="main">
+        <header>
+            <input type="text" id="site-name" placeholder="Site Name (e.g. abc)" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            <button class="pub-btn" onclick="publishSite()">Publish</button>
+        </header>
+        <div id="canvas-area">
+            <div id="canvas" contenteditable="true">
+                <h1 style="text-align: center;">My New Site</h1>
+                <p style="text-align: center;">Design your site and click Publish!</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+
+        function addText(tag) {
+            const el = document.createElement(tag);
+            el.innerText = "Double click to edit text";
+            canvas.appendChild(el);
+        }
+
+        function addLinkButton() {
+            const txt = prompt("Button Text:", "Visit Website");
+            const url = prompt("URL:", "https://");
+            if(txt && url) {
+                const a = document.createElement('a');
+                a.href = url; a.innerText = txt; a.className = "royal-btn";
+                a.target = "_blank"; a.contentEditable = "false";
+                canvas.appendChild(a);
+            }
+        }
+
+        function addEmbed() {
+            const url = prompt("URL to Embed:");
+            if(url) {
+                const div = document.createElement('div');
+                div.contentEditable = "false";
+                div.innerHTML = `<iframe src="${url}" width="100%" height="400px" style="border:none; border-radius:10px;"></iframe>`;
+                canvas.appendChild(div);
+            }
+        }
+
+        function publishSite() {
+            const slug = document.getElementById('site-name').value;
+            if(!slug) return alert("Please enter a site name!");
+
+            const fd = new FormData();
+            fd.append('publish_action', '1');
+            fd.append('site_slug', slug);
+            fd.append('site_content', canvas.innerHTML);
+
+            fetch('index.php', { method: 'POST', body: fd })
+            .then(r => r.text())
+            .then(data => {
+                if(data.trim() === "SUCCESS") {
+                    const link = window.location.origin + "/view/" + slug + "/home";
+                    alert("PUBLISHED!\nYour link: " + link);
+                    window.location.href = link;
+                }
+            });
+        }
+    </script>
+</body>
+</html>

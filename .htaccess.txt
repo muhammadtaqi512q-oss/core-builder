@@ -1,0 +1,3 @@
+RewriteEngine On
+# Rule: Change /view/SITENAME/home into index.php?site=SITENAME
+RewriteRule ^view/([^/]+)/home$ index.php?site=$1 [L,QSA]
