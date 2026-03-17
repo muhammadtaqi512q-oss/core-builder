@@ -1,132 +1,181 @@
-<?php
-// --- DATABASE LOGIC ---
-$db = new SQLite3('core_sites.db');
-$db->exec("CREATE TABLE IF NOT EXISTS sites (slug TEXT PRIMARY KEY, html TEXT)");
-
-// --- VIEWING LOGIC (For your friends) ---
-if (isset($_GET['site'])) {
-    $site_name = $_GET['site'];
-    $stmt = $db->prepare("SELECT html FROM sites WHERE slug = :slug");
-    $stmt->bindValue(':slug', $site_name, SQLITE3_TEXT);
-    $res = $stmt->execute()->fetchArray(SQLITE3_ASSOC);
-    
-    if ($res) {
-        die($res['html']); // Show the live site
-    } else {
-        die("<h1 style='font-family:sans-serif; text-align:center; margin-top:100px;'>404: Site Not Found</h1>");
-    }
-}
-
-// --- PUBLISH LOGIC (AJAX) ---
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['publish_action'])) {
-    $slug = strtolower(preg_replace('/[^a-z0-9-]/', '', $_POST['site_slug']));
-    $html = $_POST['site_content'];
-    
-    $stmt = $db->prepare("INSERT OR REPLACE INTO sites (slug, html) VALUES (:slug, :html)");
-    $stmt->bindValue(':slug', $slug, SQLITE3_TEXT);
-    $stmt->bindValue(':html', $html, SQLITE3_TEXT);
-    $stmt->execute();
-    echo "SUCCESS";
-    exit;
-}
-?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Core AI | Google Style Builder</title>
+    <title>Core AI | Pro Drag Builder</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.14.0/Sortable.min.js"></script>
     <style>
         :root { --navy: #0a192f; --gold: #f1c40f; --accent: #1a73e8; }
-        body { margin: 0; font-family: 'Segoe UI', sans-serif; display: flex; height: 100vh; background: #f0f2f5; overflow: hidden; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; display: flex; height: 100vh; background: #e0e0e0; }
 
-        /* Sidebar */
-        #sidebar { width: 300px; background: var(--navy); color: white; display: flex; flex-direction: column; padding: 20px; box-shadow: 5px 0 15px rgba(0,0,0,0.2); z-index: 10; }
-        .tool-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--gold); color: white; padding: 12px; border-radius: 6px; cursor: pointer; text-align: left; margin-bottom: 10px; transition: 0.3s; }
+        /* Sidebar UI */
+        #sidebar { width: 320px; background: var(--navy); color: white; display: flex; flex-direction: column; padding: 15px; box-shadow: 4px 0 15px rgba(0,0,0,0.3); z-index: 100; overflow-y: auto; }
+        .section-title { color: var(--gold); border-bottom: 1px solid var(--gold); margin: 15px 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .tool-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--gold); color: white; padding: 10px; border-radius: 5px; cursor: pointer; margin-bottom: 8px; text-align: left; transition: 0.3s; width: 100%; }
         .tool-btn:hover { background: var(--gold); color: var(--navy); font-weight: bold; }
 
-        /* Main Area */
-        #main { flex-grow: 1; display: flex; flex-direction: column; }
-        header { height: 65px; background: white; display: flex; align-items: center; justify-content: flex-end; padding: 0 30px; border-bottom: 1px solid #ddd; gap: 10px; }
-        #canvas-area { flex-grow: 1; padding: 40px; overflow-y: auto; display: flex; justify-content: center; background: #eef2f5; }
-        #canvas { width: 100%; max-width: 850px; background: white; min-height: 1000px; padding: 60px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); outline: none; border-radius: 8px; }
+        /* Background Grid */
+        .bg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+        .bg-thumb { width: 100%; height: 50px; cursor: pointer; border-radius: 4px; border: 1px solid transparent; object-fit: cover; }
+        .bg-thumb:hover { border-color: var(--gold); }
 
-        /* Rendered Elements */
-        .royal-btn { display: inline-block; padding: 14px 28px; background: var(--navy); color: var(--gold) !important; border: 2px solid var(--gold); border-radius: 5px; text-decoration: none; font-weight: bold; margin: 15px 0; }
-        .pub-btn { background: var(--accent); color: white; border: none; padding: 10px 25px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        /* Workspace */
+        #main-editor { flex-grow: 1; display: flex; flex-direction: column; position: relative; }
+        header { height: 60px; background: white; border-bottom: 2px solid var(--gold); display: flex; align-items: center; justify-content: space-between; padding: 0 25px; }
+        
+        #canvas-area { flex-grow: 1; padding: 30px; overflow-y: auto; background-size: cover; background-position: center; transition: 0.5s; }
+        #canvas { 
+            width: 100%; max-width: 900px; margin: 0 auto; min-height: 100vh; 
+            background: rgba(255, 255, 255, 0.9); padding: 50px; border-radius: 8px; 
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1); outline: none;
+        }
+
+        /* Elements Styling */
+        .draggable-item { position: relative; margin-bottom: 15px; padding: 10px; border: 1px dashed transparent; cursor: move; }
+        .draggable-item:hover { border-color: var(--accent); background: rgba(26, 115, 232, 0.05); }
+        
+        .royal-btn { display: inline-block; padding: 14px 28px; background: var(--navy); color: var(--gold) !important; border: 2px solid var(--gold); border-radius: 5px; text-decoration: none; font-weight: bold; }
+        .pub-btn { background: var(--accent); color: white; border: none; padding: 10px 25px; border-radius: 5px; font-weight: bold; cursor: pointer; }
+
+        /* Pages UI */
+        #pages-list { list-style: none; padding: 0; }
+        .page-item { padding: 8px; background: rgba(255,255,255,0.1); margin-bottom: 5px; border-radius: 4px; display: flex; justify-content: space-between; cursor: pointer; }
+
+        .live-mode #sidebar, .live-mode header { display: none; }
+        .live-mode #canvas-area { padding: 0; }
+        .live-mode #canvas { max-width: 100%; border-radius: 0; box-shadow: none; }
     </style>
 </head>
 <body>
 
     <div id="sidebar">
-        <h2 style="color: var(--gold); border-bottom: 1px solid var(--gold); padding-bottom: 10px;">CORE BUILDER</h2>
-        <button class="tool-btn" onclick="addText('h1')">➕ Add Heading</button>
-        <button class="tool-btn" onclick="addText('p')">➕ Add Text Box</button>
-        <button class="tool-btn" onclick="addLinkButton()">🔗 Add Link Button</button>
-        <button class="tool-btn" onclick="addEmbed()">🖼️ Add Embed</button>
+        <h2 style="color: var(--gold); text-align: center;">CORE AI PRO</h2>
+        
+        <div class="section-title">Insert Elements</div>
+        <button class="tool-btn" onclick="addItem('h1')">📝 Add Header</button>
+        <button class="tool-btn" onclick="addItem('p')">📄 Add Paragraph</button>
+        <button class="tool-btn" onclick="addButton()">🔗 Add Link Button</button>
+        <button class="tool-btn" onclick="addEmbed()">💻 HTML Code Embed</button>
+        <button class="tool-btn" onclick="addFrame()">🖼️ Link Frame (Iframe)</button>
+
+        <div class="section-title">Pages</div>
+        <ul id="pages-list"><li class="page-item">🏠 Home</li></ul>
+        <button class="tool-btn" style="border-style: dashed;" onclick="addPage()">➕ New Page</button>
+
+        <div class="section-title">20 Backgrounds</div>
+        <div class="bg-grid" id="bg-options"></div>
     </div>
 
-    <div id="main">
+    <div id="main-editor">
         <header>
-            <input type="text" id="site-name" placeholder="Site Name (e.g. abc)" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-            <button class="pub-btn" onclick="publishSite()">Publish</button>
+            <div style="font-weight: bold; color: var(--navy);">Editor Mode</div>
+            <button class="pub-btn" onclick="publish()">Publish & Copy Link</button>
         </header>
-        <div id="canvas-area">
+        <div id="canvas-area" id="bg-target">
             <div id="canvas" contenteditable="true">
-                <h1 style="text-align: center;">My New Site</h1>
-                <p style="text-align: center;">Design your site and click Publish!</p>
+                <h1 style="text-align: center;">Welcome to Core AI</h1>
+                <p style="text-align: center;">Drag elements to reorder them like Google Sites.</p>
             </div>
         </div>
     </div>
 
     <script>
         const canvas = document.getElementById('canvas');
+        
+        // --- 1. Drag & Drop Initializer ---
+        new Sortable(canvas, {
+            animation: 150,
+            ghostClass: 'blue-background-class'
+        });
 
-        function addText(tag) {
-            const el = document.createElement(tag);
-            el.innerText = "Double click to edit text";
-            canvas.appendChild(el);
+        // --- 2. Element Functions ---
+        function addItem(tag) {
+            const div = document.createElement('div');
+            div.className = "draggable-item";
+            div.innerHTML = `<${tag}>New ${tag === 'h1' ? 'Header' : 'Paragraph'}</${tag}>`;
+            canvas.appendChild(div);
         }
 
-        function addLinkButton() {
-            const txt = prompt("Button Text:", "Visit Website");
+        function addButton() {
+            const txt = prompt("Button Text:", "Visit My Site");
             const url = prompt("URL:", "https://");
             if(txt && url) {
-                const a = document.createElement('a');
-                a.href = url; a.innerText = txt; a.className = "royal-btn";
-                a.target = "_blank"; a.contentEditable = "false";
-                canvas.appendChild(a);
-            }
-        }
-
-        function addEmbed() {
-            const url = prompt("URL to Embed:");
-            if(url) {
                 const div = document.createElement('div');
-                div.contentEditable = "false";
-                div.innerHTML = `<iframe src="${url}" width="100%" height="400px" style="border:none; border-radius:10px;"></iframe>`;
+                div.className = "draggable-item";
+                div.innerHTML = `<a href="${url}" class="royal-btn" target="_blank" contenteditable="false">${txt}</a>`;
                 canvas.appendChild(div);
             }
         }
 
-        function publishSite() {
-            const slug = document.getElementById('site-name').value;
-            if(!slug) return alert("Please enter a site name!");
-
-            const fd = new FormData();
-            fd.append('publish_action', '1');
-            fd.append('site_slug', slug);
-            fd.append('site_content', canvas.innerHTML);
-
-            fetch('index.php', { method: 'POST', body: fd })
-            .then(r => r.text())
-            .then(data => {
-                if(data.trim() === "SUCCESS") {
-                    const link = window.location.origin + "/view/" + slug + "/home";
-                    alert("PUBLISHED!\nYour link: " + link);
-                    window.location.href = link;
-                }
-            });
+        function addEmbed() {
+            const code = prompt("Paste HTML Code:");
+            if(code) {
+                const div = document.createElement('div');
+                div.className = "draggable-item";
+                div.contentEditable = "false";
+                div.innerHTML = code;
+                canvas.appendChild(div);
+            }
         }
+
+        function addFrame() {
+            const url = prompt("Website URL to Frame:");
+            if(url) {
+                const div = document.createElement('div');
+                div.className = "draggable-item";
+                div.contentEditable = "false";
+                div.innerHTML = `<iframe src="${url}" width="100%" height="400px" style="border:2px solid var(--gold); border-radius:8px;"></iframe>`;
+                canvas.appendChild(div);
+            }
+        }
+
+        // --- 3. Background System (20 Images) ---
+        const bgArea = document.getElementById('canvas-area');
+        const bgGrid = document.getElementById('bg-options');
+        for(let i=1; i<=20; i++) {
+            const img = document.createElement('img');
+            const url = `https://picsum.photos/id/${i+10}/800/600`;
+            img.src = url;
+            img.className = "bg-thumb";
+            img.onclick = () => bgArea.style.backgroundImage = `url('${url}')`;
+            bgGrid.appendChild(img);
+        }
+
+        // --- 4. Page System ---
+        function addPage() {
+            const name = prompt("Page Name:");
+            if(name) {
+                const li = document.createElement('li');
+                li.className = "page-item";
+                li.innerText = "📄 " + name;
+                document.getElementById('pages-list').appendChild(li);
+            }
+        }
+
+        // --- 5. Publish Logic (GitHub Compatible) ---
+        function publish() {
+            const html = canvas.innerHTML;
+            const bg = bgArea.style.backgroundImage;
+            const data = JSON.stringify({ h: html, b: bg });
+            const encoded = btoa(unescape(encodeURIComponent(data)));
+            const url = window.location.origin + window.location.pathname + "?site=" + encoded;
+            
+            navigator.clipboard.writeText(url);
+            alert("LINK COPIED!\nGoogle Sites style link is ready.");
+            window.location.search = "?site=" + encoded;
+        }
+
+        window.onload = () => {
+            const params = new URLSearchParams(window.location.search);
+            if(params.has('site')) {
+                const decoded = JSON.parse(decodeURIComponent(escape(atob(params.get('site')))));
+                document.body.classList.add('live-mode');
+                canvas.contentEditable = "false";
+                canvas.innerHTML = decoded.h;
+                bgArea.style.backgroundImage = decoded.b;
+            }
+        };
     </script>
 </body>
 </html>
